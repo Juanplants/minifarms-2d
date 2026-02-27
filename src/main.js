@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 
+const SAVE_KEY = 'miniFarm2D_day6_state_v1';
+
 class MainScene extends Phaser.Scene {
   constructor() {
     super('MainScene');
@@ -11,16 +13,26 @@ class MainScene extends Phaser.Scene {
     this.worldWidth = 2200;
     this.worldHeight = 1400;
 
-    // Estado base del jugador/economía (Día 5)
-    this.money = 0;
-    this.xp = 0;
-    this.seeds = 3;
-
     this.cropConfig = {
-      growMs: 5000, // 5 segundos demo
+      growMs: 5000,
       rewardMoney: 12,
       rewardXp: 8,
     };
+
+    // Estado por defecto
+    const defaultState = {
+      money: 0,
+      xp: 0,
+      seeds: 3,
+      player: { x: 320, y: 240 },
+      plot: {
+        state: 'vacia',
+        plantedAt: null,
+      },
+    };
+
+    // Carga de estado persistido
+    this.gameState = this.loadState(defaultState);
 
     // Mundo y cámara
     this.physics.world.setBounds(0, 0, this.worldWidth, this.worldHeight);
@@ -34,7 +46,7 @@ class MainScene extends Phaser.Scene {
     for (let y = 0; y <= this.worldHeight; y += 64) grid.lineBetween(0, y, this.worldWidth, y);
 
     // Jugador
-    const playerRect = this.add.rectangle(320, 240, 28, 28, 0x22d3ee);
+    const playerRect = this.add.rectangle(this.gameState.player.x, this.gameState.player.y, 28, 28, 0x22d3ee);
     this.physics.add.existing(playerRect);
     this.player = playerRect;
     this.player.body.setCollideWorldBounds(true);
@@ -55,7 +67,7 @@ class MainScene extends Phaser.Scene {
     this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
     this.cameras.main.setDeadzone(260, 160);
 
-    // Obstáculos simples
+    // Obstáculos
     this.obstacles = this.physics.add.staticGroup();
     const obstacleData = [
       { x: 520, y: 360, w: 140, h: 48 },
@@ -72,14 +84,14 @@ class MainScene extends Phaser.Scene {
 
     this.physics.add.collider(this.player, this.obstacles);
 
-    // Parcela de prueba
+    // Parcela
     this.plot = {
       x: 980,
       y: 760,
       width: 84,
       height: 84,
-      state: 'vacia',
-      plantedAt: null,
+      state: this.gameState.plot.state,
+      plantedAt: this.gameState.plot.plantedAt,
     };
 
     this.plotRect = this.add
@@ -88,7 +100,7 @@ class MainScene extends Phaser.Scene {
 
     // HUD
     this.titleText = this.add
-      .text(16, 16, 'Dia 5: Loop agricola minimo (E)', {
+      .text(16, 16, 'Dia 6: HUD + Persistencia (autoguardado)', {
         fontFamily: 'monospace',
         fontSize: '16px',
         color: '#ffffff',
@@ -104,7 +116,7 @@ class MainScene extends Phaser.Scene {
       .setScrollFactor(0);
 
     this.stateText = this.add
-      .text(16, 64, 'Estado parcela: vacia', {
+      .text(16, 64, '', {
         fontFamily: 'monospace',
         fontSize: '14px',
         color: '#fcd34d',
@@ -112,23 +124,30 @@ class MainScene extends Phaser.Scene {
       .setScrollFactor(0);
 
     this.feedbackText = this.add
-      .text(16, 88, 'Acercate y presiona E para sembrar', {
+      .text(16, 88, 'Acercate y presiona E para sembrar (autoguardado activo)', {
         fontFamily: 'monospace',
         fontSize: '14px',
         color: '#f9fafb',
       })
       .setScrollFactor(0);
 
+    this.lastAutoSave = 0;
     this.updatePlotVisual();
     this.updateStatsText();
   }
 
-  update() {
+  update(time) {
     this.handleMovement();
     this.updatePlotGrowth();
 
     if (Phaser.Input.Keyboard.JustDown(this.actionKey)) {
       this.tryInteractPlot();
+    }
+
+    // Auto-guardado cada 1 segundo
+    if (time - this.lastAutoSave > 1000) {
+      this.persistState();
+      this.lastAutoSave = time;
     }
   }
 
@@ -162,60 +181,61 @@ class MainScene extends Phaser.Scene {
       return;
     }
 
-    // Sembrar
-    if (this.plot.state === 'vacia') {
-      if (this.seeds <= 0) {
+    if (this.gameState.plot.state === 'vacia') {
+      if (this.gameState.seeds <= 0) {
         this.feedbackText.setText('No tienes semillas. No puedes sembrar.');
         return;
       }
 
-      this.seeds -= 1;
-      this.plot.state = 'sembrada';
-      this.plot.plantedAt = this.time.now;
+      this.gameState.seeds -= 1;
+      this.gameState.plot.state = 'sembrada';
+      this.gameState.plot.plantedAt = Date.now();
       this.feedbackText.setText('Sembraste 1 semilla 🌱');
+      this.syncPlotFromState();
       this.updatePlotVisual();
       this.updateStatsText();
+      this.persistState();
       return;
     }
 
-    // Aún en crecimiento
-    if (this.plot.state === 'sembrada') {
+    if (this.gameState.plot.state === 'sembrada') {
       this.feedbackText.setText('Aun creciendo... espera unos segundos.');
       return;
     }
 
-    // Cosechar
-    if (this.plot.state === 'lista') {
-      this.plot.state = 'vacia';
-      this.plot.plantedAt = null;
-
-      this.money += this.cropConfig.rewardMoney;
-      this.xp += this.cropConfig.rewardXp;
+    if (this.gameState.plot.state === 'lista') {
+      this.gameState.plot.state = 'vacia';
+      this.gameState.plot.plantedAt = null;
+      this.gameState.money += this.cropConfig.rewardMoney;
+      this.gameState.xp += this.cropConfig.rewardXp;
 
       this.feedbackText.setText(
-        `Cosecha exitosa +${this.cropConfig.rewardMoney} monedas, +${this.cropConfig.rewardXp} XP ✅`
+        `Cosecha +${this.cropConfig.rewardMoney} monedas, +${this.cropConfig.rewardXp} XP ✅`
       );
 
+      this.syncPlotFromState();
       this.updatePlotVisual();
       this.updateStatsText();
+      this.persistState();
     }
   }
 
   updatePlotGrowth() {
-    if (this.plot.state !== 'sembrada' || this.plot.plantedAt == null) {
-      this.stateText.setText(`Estado parcela: ${this.plot.state}`);
+    if (this.gameState.plot.state !== 'sembrada' || this.gameState.plot.plantedAt == null) {
+      this.stateText.setText(`Estado parcela: ${this.gameState.plot.state}`);
       return;
     }
 
-    const elapsed = this.time.now - this.plot.plantedAt;
+    const elapsed = Date.now() - this.gameState.plot.plantedAt;
     const remaining = Math.max(0, this.cropConfig.growMs - elapsed);
 
     if (remaining <= 0) {
-      this.plot.state = 'lista';
-      this.plot.plantedAt = null;
+      this.gameState.plot.state = 'lista';
+      this.gameState.plot.plantedAt = null;
       this.feedbackText.setText('La parcela esta lista para cosechar ✅');
+      this.syncPlotFromState();
       this.updatePlotVisual();
-      this.stateText.setText('Estado parcela: lista');
+      this.persistState();
       return;
     }
 
@@ -224,19 +244,59 @@ class MainScene extends Phaser.Scene {
   }
 
   updatePlotVisual() {
-    if (this.plot.state === 'vacia') {
-      this.plotRect.fillColor = 0x8b5a2b; // marrón
-    } else if (this.plot.state === 'sembrada') {
-      this.plotRect.fillColor = 0x16a34a; // verde
+    if (this.gameState.plot.state === 'vacia') {
+      this.plotRect.fillColor = 0x8b5a2b;
+    } else if (this.gameState.plot.state === 'sembrada') {
+      this.plotRect.fillColor = 0x16a34a;
     } else {
-      this.plotRect.fillColor = 0xf59e0b; // lista para cosecha
+      this.plotRect.fillColor = 0xf59e0b;
     }
 
-    this.stateText.setText(`Estado parcela: ${this.plot.state}`);
+    this.stateText.setText(`Estado parcela: ${this.gameState.plot.state}`);
   }
 
   updateStatsText() {
-    this.statsText.setText(`Monedas: ${this.money} | XP: ${this.xp} | Semillas: ${this.seeds}`);
+    this.statsText.setText(
+      `Monedas: ${this.gameState.money} | XP: ${this.gameState.xp} | Semillas: ${this.gameState.seeds}`
+    );
+  }
+
+  syncPlotFromState() {
+    this.plot.state = this.gameState.plot.state;
+    this.plot.plantedAt = this.gameState.plot.plantedAt;
+  }
+
+  persistState() {
+    this.gameState.player = {
+      x: Math.round(this.player.x),
+      y: Math.round(this.player.y),
+    };
+
+    localStorage.setItem(SAVE_KEY, JSON.stringify(this.gameState));
+  }
+
+  loadState(defaultState) {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return structuredClone(defaultState);
+
+      const parsed = JSON.parse(raw);
+      return {
+        money: parsed?.money ?? defaultState.money,
+        xp: parsed?.xp ?? defaultState.xp,
+        seeds: parsed?.seeds ?? defaultState.seeds,
+        player: {
+          x: parsed?.player?.x ?? defaultState.player.x,
+          y: parsed?.player?.y ?? defaultState.player.y,
+        },
+        plot: {
+          state: parsed?.plot?.state ?? defaultState.plot.state,
+          plantedAt: parsed?.plot?.plantedAt ?? defaultState.plot.plantedAt,
+        },
+      };
+    } catch {
+      return structuredClone(defaultState);
+    }
   }
 }
 
