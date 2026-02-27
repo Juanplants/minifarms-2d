@@ -11,6 +11,17 @@ class MainScene extends Phaser.Scene {
     this.worldWidth = 2200;
     this.worldHeight = 1400;
 
+    // Estado base del jugador/economía (Día 5)
+    this.money = 0;
+    this.xp = 0;
+    this.seeds = 3;
+
+    this.cropConfig = {
+      growMs: 5000, // 5 segundos demo
+      rewardMoney: 12,
+      rewardXp: 8,
+    };
+
     // Mundo y cámara
     this.physics.world.setBounds(0, 0, this.worldWidth, this.worldHeight);
     this.cameras.main.setBounds(0, 0, this.worldWidth, this.worldHeight);
@@ -37,14 +48,14 @@ class MainScene extends Phaser.Scene {
       d: Phaser.Input.Keyboard.KeyCodes.D,
     });
 
-    // Input acción (E)
+    // Input acción
     this.actionKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
 
     // Cámara
     this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
     this.cameras.main.setDeadzone(260, 160);
 
-    // Obstáculos (igual que Día 3)
+    // Obstáculos simples
     this.obstacles = this.physics.add.staticGroup();
     const obstacleData = [
       { x: 520, y: 360, w: 140, h: 48 },
@@ -69,24 +80,23 @@ class MainScene extends Phaser.Scene {
       height: 84,
       state: 'vacia',
       plantedAt: null,
-      growMs: 5000, // 5 segundos para demo
     };
 
     this.plotRect = this.add
       .rectangle(this.plot.x, this.plot.y, this.plot.width, this.plot.height, 0x8b5a2b)
       .setStrokeStyle(2, 0xd6b98c);
 
-    // Mensajes UI
+    // HUD
     this.titleText = this.add
-      .text(16, 16, 'Dia 4: Interaccion de parcela (E)', {
+      .text(16, 16, 'Dia 5: Loop agricola minimo (E)', {
         fontFamily: 'monospace',
         fontSize: '16px',
         color: '#ffffff',
       })
       .setScrollFactor(0);
 
-    this.helpText = this.add
-      .text(16, 40, 'Acercate a la parcela y presiona E', {
+    this.statsText = this.add
+      .text(16, 40, '', {
         fontFamily: 'monospace',
         fontSize: '14px',
         color: '#a7f3d0',
@@ -102,7 +112,7 @@ class MainScene extends Phaser.Scene {
       .setScrollFactor(0);
 
     this.feedbackText = this.add
-      .text(16, 88, '', {
+      .text(16, 88, 'Acercate y presiona E para sembrar', {
         fontFamily: 'monospace',
         fontSize: '14px',
         color: '#f9fafb',
@@ -110,6 +120,7 @@ class MainScene extends Phaser.Scene {
       .setScrollFactor(0);
 
     this.updatePlotVisual();
+    this.updateStatsText();
   }
 
   update() {
@@ -151,24 +162,42 @@ class MainScene extends Phaser.Scene {
       return;
     }
 
+    // Sembrar
     if (this.plot.state === 'vacia') {
+      if (this.seeds <= 0) {
+        this.feedbackText.setText('No tienes semillas. No puedes sembrar.');
+        return;
+      }
+
+      this.seeds -= 1;
       this.plot.state = 'sembrada';
       this.plot.plantedAt = this.time.now;
-      this.feedbackText.setText('Sembraste la parcela 🌱');
+      this.feedbackText.setText('Sembraste 1 semilla 🌱');
       this.updatePlotVisual();
+      this.updateStatsText();
       return;
     }
 
+    // Aún en crecimiento
     if (this.plot.state === 'sembrada') {
       this.feedbackText.setText('Aun creciendo... espera unos segundos.');
       return;
     }
 
+    // Cosechar
     if (this.plot.state === 'lista') {
       this.plot.state = 'vacia';
       this.plot.plantedAt = null;
-      this.feedbackText.setText('Cosechaste! Parcela lista para sembrar de nuevo.');
+
+      this.money += this.cropConfig.rewardMoney;
+      this.xp += this.cropConfig.rewardXp;
+
+      this.feedbackText.setText(
+        `Cosecha exitosa +${this.cropConfig.rewardMoney} monedas, +${this.cropConfig.rewardXp} XP ✅`
+      );
+
       this.updatePlotVisual();
+      this.updateStatsText();
     }
   }
 
@@ -179,7 +208,7 @@ class MainScene extends Phaser.Scene {
     }
 
     const elapsed = this.time.now - this.plot.plantedAt;
-    const remaining = Math.max(0, this.plot.growMs - elapsed);
+    const remaining = Math.max(0, this.cropConfig.growMs - elapsed);
 
     if (remaining <= 0) {
       this.plot.state = 'lista';
@@ -200,10 +229,14 @@ class MainScene extends Phaser.Scene {
     } else if (this.plot.state === 'sembrada') {
       this.plotRect.fillColor = 0x16a34a; // verde
     } else {
-      this.plotRect.fillColor = 0xf59e0b; // naranja: lista
+      this.plotRect.fillColor = 0xf59e0b; // lista para cosecha
     }
 
     this.stateText.setText(`Estado parcela: ${this.plot.state}`);
+  }
+
+  updateStatsText() {
+    this.statsText.setText(`Monedas: ${this.money} | XP: ${this.xp} | Semillas: ${this.seeds}`);
   }
 }
 
